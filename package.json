@@ -26,8 +26,7 @@
     "wav-file-info": "0.0.8"
   },
   "engines": {
-    "node": ">=4.0.0",
-    "npm": "^2.0.0"
+    "node": ">=4.0.0"
   },
   "main": "lib/sonos-http-api.js",
   "license": "MIT",
