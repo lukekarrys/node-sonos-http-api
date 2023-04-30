@@ -1,11 +1,11 @@
 {
-  "extends": "airbnb-base",
+  "extends": "eslint:recommended",
+  "parserOptions": {
+    "ecmaVersion": "latest"
+  },
   "env": {
+    "es6": true,
     "node": true,
     "mocha": true
-  },
-  "rules": {
-    "comma-dangle": 0,
-    "strict": 0
   }
 }

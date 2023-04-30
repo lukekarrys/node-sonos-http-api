@@ -26,6 +26,5 @@
     "repeat": "all",
     "crossfade": false
   },
-  "pauseOthers": false,
-
+  "pauseOthers": false
 }
