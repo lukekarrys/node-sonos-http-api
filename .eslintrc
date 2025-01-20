@@ -1,11 +1,13 @@
 {
   "extends": "eslint:recommended",
   "parserOptions": {
-    "ecmaVersion": "latest"
+    "ecmaVersion": "latest",
+    "sourceType": "module"
   },
   "env": {
     "es6": true,
     "node": true,
     "mocha": true
-  }
+  },
+  "ignorePatterns": ["**/_lib-archived/**", "**/sonos-discovery/**"]
 }
