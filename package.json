@@ -5,6 +5,7 @@
   "scripts": {
     "lint": "eslint ."
   },
+  "type": "module",
   "repository": {
     "type": "git",
     "url": "https://github.com/lukekarrys/node-sonos-http-api.git"

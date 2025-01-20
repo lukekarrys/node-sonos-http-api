@@ -1,39 +1,11 @@
 import { once } from 'events'
 import http from 'http'
-import SonosSystem from './sonos-discovery/lib/SonosSystem.js'
 import logger from './sonos-discovery/lib/helpers/logger.js'
 import SonosHttpAPI from './lib/sonos-http-api.js'
-import path from 'path'
-import fs from 'fs'
 
-process.on('unhandledRejection', (err) => logger.error(err))
-process.on('uncaughtException', (err) => logger.error(err))
+const api = new SonosHttpAPI()
 
-const settings = {
-  port: 5005,
-  ip: '0.0.0.0',
-  presets: (() => {
-    const res = {}
-
-    for (const file of fs.readdirSync(path.resolve(__dirname, 'presets'), {
-      withFileTypes: true,
-    })) {
-      if (
-        file.isFile() &&
-        !file.name.startsWith('_') &&
-        path.extname(file.name) === '.json'
-      ) {
-        res[file.name.replace(/\.json/i, '')] = JSON.parse(
-          fs.readFileSync(path.join(file.parentPath, file.name), 'utf8')
-        )
-      }
-    }
-
-    return res
-  })(),
-}
-
-const api = new SonosHttpAPI(new SonosSystem(), settings)
+await api.loadActions()
 
 const server = http
   .createServer()
@@ -54,7 +26,22 @@ const server = http
     }
 
     if (req.method === 'POST') {
-      await api.requestHandler(req, res)
+      try {
+        const res = await api.requestHandler(req, res)
+        if (res) {
+          const [code, body] = res
+          const json = JSON.stringify(body)
+          res.statusCode = code
+          res.setHeader('Content-Length', Buffer.byteLength(json))
+          res.setHeader('Content-Type', 'application/json;charset=utf-8')
+          res.write(Buffer.from(json))
+          res.end()
+        }
+      } catch (error) {
+        const message = error?.error || error?.message
+        return [500, { status: 'error', error: message }]
+      }
+
       return
     }
 
