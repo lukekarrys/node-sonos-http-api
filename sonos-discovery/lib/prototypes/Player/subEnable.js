@@ -1,12 +1,12 @@
-'use strict';
-const soap = require('../../helpers/soap');
-const TYPE = soap.TYPE;
+const soap = require('../../helpers/soap')
+const TYPE = soap.TYPE
 
 function subEnable() {
   return soap.invoke(
     `${this.baseUrl}/MediaRenderer/RenderingControl/Control`,
     TYPE.SetEQ,
-    { eqType: 'SubEnable', value: 1 });
-};
+    { eqType: 'SubEnable', value: 1 }
+  )
+}
 
-module.exports = subEnable;
+module.exports = subEnable

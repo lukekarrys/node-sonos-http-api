@@ -1,7 +1,5 @@
-'use strict';
-
 function getFavorites() {
-  return this.getAnyPlayer().browseAll('FV:2');
+  return this.getAnyPlayer().browseAll('FV:2')
 }
 
-module.exports = getFavorites;
+module.exports = getFavorites

@@ -1,14 +1,14 @@
-'use strict';
-const soap = require('../../helpers/soap');
-const POLARITY = require('../../types/sub-polarity');
-const TYPE = soap.TYPE;
+const soap = require('../../helpers/soap')
+const POLARITY = require('../../types/sub-polarity')
+const TYPE = soap.TYPE
 
 function subPolarity(polarity) {
-  polarity = polarity == POLARITY.INVERSE ? POLARITY.INVERSE : POLARITY.NONE;
+  polarity = polarity == POLARITY.INVERSE ? POLARITY.INVERSE : POLARITY.NONE
   return soap.invoke(
     `${this.baseUrl}/MediaRenderer/RenderingControl/Control`,
     TYPE.SetEQ,
-    { eqType: 'SubPolarity', value: polarity });
+    { eqType: 'SubPolarity', value: polarity }
+  )
 }
 
-module.exports = subPolarity;
+module.exports = subPolarity

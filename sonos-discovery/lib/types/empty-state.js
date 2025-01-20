@@ -1,7 +1,5 @@
-'use strict';
-
-const REPEAT_MODE = require('./repeat-mode');
-const URI_TYPE = require('./uri-type');
+const REPEAT_MODE = require('./repeat-mode')
+const URI_TYPE = require('./uri-type')
 
 const EMPTY_STATE = Object.freeze({
   currentTrack: Object.freeze({
@@ -21,12 +19,12 @@ const EMPTY_STATE = Object.freeze({
     album: '',
     albumArtUri: '',
     duration: 0,
-    uri: ''
+    uri: '',
   }),
   playMode: Object.freeze({
     repeat: REPEAT_MODE.NONE,
     shuffle: false,
-    crossfade: false
+    crossfade: false,
   }),
   playlistName: '',
   relTime: 0,
@@ -38,8 +36,8 @@ const EMPTY_STATE = Object.freeze({
   equalizer: {
     bass: 0,
     treble: 0,
-    loudness: false
-  }
-});
+    loudness: false,
+  },
+})
 
-module.exports = EMPTY_STATE;
+module.exports = EMPTY_STATE

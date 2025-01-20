@@ -1,9 +1,7 @@
-'use strict';
-
 class ArgumentError extends Error {
   constructor(m) {
-    super(m);
+    super(m)
   }
 }
 
-module.exports = ArgumentError;
+module.exports = ArgumentError

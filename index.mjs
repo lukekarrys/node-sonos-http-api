@@ -5,8 +5,6 @@ import SonosHttpAPI from './lib/sonos-http-api.js'
 
 const api = new SonosHttpAPI()
 
-await api.loadActions()
-
 const server = http
   .createServer()
   .on('request', async (req, res) => {
@@ -27,9 +25,9 @@ const server = http
 
     if (req.method === 'POST') {
       try {
-        const res = await api.requestHandler(req, res)
-        if (res) {
-          const [code, body] = res
+        const apiRes = await api.requestHandler(req, res)
+        if (apiRes) {
+          const [code, body] = apiRes
           const json = JSON.stringify(body)
           res.statusCode = code
           res.setHeader('Content-Length', Buffer.byteLength(json))
@@ -39,7 +37,10 @@ const server = http
         }
       } catch (error) {
         const message = error?.error || error?.message
-        return [500, { status: 'error', error: message }]
+        console.log(error)
+        res.statusCode = 500
+        res.write(message)
+        res.end()
       }
 
       return

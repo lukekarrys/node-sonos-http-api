@@ -9,5 +9,5 @@
     "node": true,
     "mocha": true
   },
-  "ignorePatterns": ["**/_lib-archived/**", "**/sonos-discovery/**"]
+  "ignorePatterns": ["**/_lib-archived/**"]
 }
