@@ -6,8 +6,9 @@
   },
   "env": {
     "es6": true,
-    "node": true,
-    "mocha": true
+    "node": true
   },
-  "ignorePatterns": ["**/_lib-archived/**"]
+  "rules": {
+    "no-undef": "error"
+  }
 }
