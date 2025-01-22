@@ -17,13 +17,5 @@ export default tseslint.config(
         ...globals.node,
       },
     },
-    rules: {
-      '@typescript-eslint/no-misused-promises': [
-        'error',
-        {
-          checksVoidReturn: false,
-        },
-      ],
-    },
   },
 )
