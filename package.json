@@ -4,7 +4,8 @@
   "description": "A simple node app for controlling a Sonos system with basic HTTP requests",
   "scripts": {
     "lint": "prettier --write . && eslint . --fix",
-    "check": "tsc"
+    "check": "tsc --noEmit",
+    "test": "npm run check && npm run lint"
   },
   "type": "module",
   "repository": {
@@ -14,16 +15,22 @@
   "main": "lib/sonos-http-api.js",
   "license": "MIT",
   "devDependencies": {
+    "@eslint/js": "^9.18.0",
     "@types/body-parser": "^1.19.5",
     "@types/cors": "^2.8.17",
-    "eslint": "^8.39.0",
-    "prettier": "^3.4.2"
+    "@types/node": "^22.10.7",
+    "eslint": "^9.18.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.21.0"
   },
   "dependencies": {
     "@polka/parse": "^1.0.0-next.28",
     "@svrooij/sonos": "^2.6.0-beta.11",
     "cors": "^2.8.5",
     "polka": "^1.0.0-next.28",
-    "trouter": "^4.0.0"
+    "trouter": "^4.0.0",
+    "zod": "^3.24.1"
   }
 }

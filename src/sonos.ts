@@ -1,7 +1,7 @@
 import { SonosManager } from '@svrooij/sonos'
 import { PlayMode } from '@svrooij/sonos/lib/models/playmode.js'
 
-const PLAY_MODES = {
+export const PLAY_MODES = {
   normal: PlayMode.Normal,
   'repeat-all': PlayMode.RepeatAll,
   'repeat-one': PlayMode.RepeatOne,
@@ -9,8 +9,6 @@ const PLAY_MODES = {
   'shuffle-no-repeat': PlayMode.ShuffleNoRepeat,
   'shuffle-repeat-one': PlayMode.ShuffleRepeatOne,
 } as const
-
-export const playModes = Object.keys(PLAY_MODES)
 
 export const manager = new SonosManager()
 
@@ -24,17 +22,6 @@ export const findDeviceByName = (name: string | undefined) => {
   )
 
   return [devices.get(deviceId), [...devices.keys()]] as const
-}
-
-export const getPlayMode = (mode: string) => {
-  const playMode =
-    mode in PLAY_MODES ? PLAY_MODES[mode as keyof typeof PLAY_MODES] : null
-
-  if (!playMode) {
-    return undefined
-  }
-
-  return playMode
 }
 
 export const runAction = async (action: Promise<boolean>) => {

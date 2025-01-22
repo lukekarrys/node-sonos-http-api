@@ -15,14 +15,25 @@ export const jsonError = (
   res: Response,
   code: number,
   message: string,
-  extra?: unknown
+  extra?: unknown,
 ) => json(res, code, Object.assign({ error: message }, extra))
 
 export const invalidParam = (
   res: Response,
   param: string | undefined,
-  expected: string[] | readonly string[]
+  expected: string[] | readonly string[],
 ) => jsonError(res, 400, `Invalid param: "${param}"`, { expected })
+
+export const invalidBodyOrParams = (
+  res: Response,
+  req: Request,
+  err: unknown,
+) =>
+  jsonError(res, 400, `Invalid body or params`, {
+    body: req.body as unknown,
+    params: req.params,
+    error: err,
+  })
 
 export const sse = (req: Request, res: Response) => {
   const write = (data: string) =>

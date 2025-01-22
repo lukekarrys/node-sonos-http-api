@@ -1,10 +1,15 @@
-import polka from 'polka'
+import polka, { type Request, type Response, type NextHandler } from 'polka'
 import { once } from 'node:events'
 import cors from 'cors'
 import { urlencoded } from '@polka/parse'
 import { jsonError, invalidParam } from './send.ts'
 import { managerRoutes, deviceRoutes } from './routes.ts'
 import { manager, findDeviceByName } from './sonos.ts'
+
+const logger = () => (req: Request, res: Response, next: NextHandler) => {
+  // console.log(req.url, req.body, req.headers)
+  return next()
+}
 
 const app = polka({
   onNoMatch: (_req, res) => jsonError(res, 404, 'Not found'),
@@ -14,11 +19,11 @@ const app = polka({
       res,
       500,
       'Internal server error',
-      typeof err === 'string' ? {} : err
+      typeof err === 'string' ? {} : err,
     )
   },
 })
-  .use(cors(), urlencoded())
+  .use(cors(), urlencoded(), logger())
   .get('/hc', (_req, res) => void res.end('OK'))
 
 for (const [method, path, handler] of managerRoutes) {
@@ -27,7 +32,7 @@ for (const [method, path, handler] of managerRoutes) {
 
 for (const [method, path, handler] of deviceRoutes) {
   const key = 'deviceParam'
-  app.add(method, `/d/:${key}${path!}`, (req, res) => {
+  app.add(method, `/d/:${key}${path}`, (req, res) => {
     const param = req.params[key]
     const [device, devices] = findDeviceByName(param)
     if (!device) {

@@ -3,26 +3,117 @@ import type { Methods } from 'trouter'
 import type { SonosDevice, SonosManager } from '@svrooij/sonos'
 import { type StrongSonosEvents } from '@svrooij/sonos/lib/models/strong-sonos-events.js'
 import { PlayMode } from '@svrooij/sonos/lib/models/playmode.js'
-import { MetaDataHelper, SonosEvents } from '@svrooij/sonos'
-import { json, empty, sse, jsonError, invalidParam } from './send.ts'
+import { SonosEvents } from '@svrooij/sonos'
 import {
-  getPlayMode,
+  json,
+  empty,
+  sse,
+  jsonError,
+  invalidParam,
+  invalidBodyOrParams,
+} from './send.ts'
+import {
+  PLAY_MODES,
   normalizeDeviceName,
-  playModes,
   runAction,
   runActions,
 } from './sonos.ts'
+import { z } from 'zod'
+
+const playModeSchema = z
+  .string()
+  .refine(
+    (v): v is keyof typeof PLAY_MODES => Object.keys(PLAY_MODES).includes(v),
+    {
+      message: 'Invalid playMode',
+    },
+  )
+  .transform((v) => PLAY_MODES[v])
+
+const bodySchema = z.object({
+  play: z.optional(
+    z
+      .string()
+      .refine((value) => value === 'true' || value === 'false', {
+        message: 'Value must be a boolean',
+      })
+      .transform((value) => value === 'true'),
+  ),
+  shuffleOnType: z.optional(
+    z.union([z.literal('album'), z.literal('playlist')]),
+  ),
+  playMode: z.optional(playModeSchema),
+})
+
+function processMusicUrl(urlString: string) {
+  const url = new URL(urlString)
+
+  if (url.hostname === 'music.apple.com') {
+    const path = url.pathname.replace(/^\//, '').split('/').slice(1)
+
+    if (path[0] === 'album' && url.searchParams.has('i')) {
+      return {
+        service: 'apple',
+        type: 'track',
+        id: url.searchParams.get('i')!,
+      }
+    }
+
+    if (path[0] === 'album' && path.at(-1)) {
+      return {
+        service: 'apple',
+        type: 'album',
+        id: path.at(-1)!,
+      }
+    }
+
+    if (path[0] === 'playlist' && path.at(-1)) {
+      return {
+        service: 'apple',
+        type: 'playlist',
+        id: path.at(-1)!,
+      }
+    }
+  }
+
+  throw new Error('Invalid music URL')
+}
+
+const bodyWithUrlSchema = bodySchema.extend({
+  url: z
+    .string()
+    .url()
+    .refine(
+      (v) => {
+        try {
+          processMusicUrl(v)
+          return true
+        } catch {
+          return false
+        }
+      },
+      {
+        message: 'Invalid music URL',
+      },
+    )
+    .transform((v) => processMusicUrl(v)),
+})
+
+const bodyWithParamSchema = bodySchema.extend({
+  // https://sonos-ts.svrooij.io/sonos-device/methods.html#metadata
+  param: z.string(),
+})
 
 const deviceSse = <
   TEvent extends SonosEvents,
   THandler extends StrongSonosEvents[TEvent],
-  TData extends Parameters<THandler>[0]
+  TData extends Parameters<THandler>[0],
 >(
   device: SonosDevice,
   req: Request,
   res: Response,
   event: TEvent,
-  cb: (data: TData) => object
+  cb: (data: TData) => object,
 ) => {
   const write = sse(req, res)
   device.Events.on(event, ((data: TData) =>
@@ -41,20 +132,20 @@ const deviceNoContent = async (p: Promise<boolean>, res: Response) => {
 const replaceQueueWithURI = async (
   device: SonosDevice,
   uri: string,
-  { play, playMode }: { play?: boolean; playMode?: PlayMode }
+  { play, playMode }: { play?: boolean; playMode?: PlayMode },
 ) =>
   runActions([
     () =>
       device.AVTransportService.RemoveAllTracksFromQueue({
         InstanceID: 0,
       }),
-    playMode
-      ? () =>
-          device.AVTransportService.SetPlayMode({
-            InstanceID: 0,
-            NewPlayMode: playMode,
-          })
-      : null,
+    playMode ?
+      () =>
+        device.AVTransportService.SetPlayMode({
+          InstanceID: 0,
+          NewPlayMode: playMode,
+        })
+    : null,
     () => device.AddUriToQueue(uri).then((r) => Boolean(r)),
     play ? () => device.Play() : null,
   ])
@@ -63,7 +154,7 @@ const splitRoutes = <T>(
   routes: Record<
     `${Methods} /${string}`,
     (arg1: T, req: Request, res: Response) => Promise<void> | void
-  >
+  >,
 ) =>
   Object.entries(routes).map(([key, handler]) => {
     const [method, path] = key.split(' ')
@@ -76,7 +167,7 @@ export const managerRoutes = splitRoutes<SonosManager>({
     json(
       res,
       200,
-      manager.Devices.map((d) => normalizeDeviceName(d.Name))
+      manager.Devices.map((d) => normalizeDeviceName(d.Name)),
     ),
 })
 
@@ -101,17 +192,16 @@ export const deviceRoutes = splitRoutes<SonosDevice>({
     return deviceNoContent(device.Previous(), res)
   },
   'POST /playmode/:param': async (device, req, res) => {
-    const { param = '' } = req.params
-    const playMode = getPlayMode(param)
-    if (!playMode) {
-      return invalidParam(res, param, playModes)
+    const p = playModeSchema.safeParse(req.params.param)
+    if (!p.success) {
+      return invalidParam(res, req.params.param, Object.keys(PLAY_MODES))
     }
     return deviceNoContent(
       device.AVTransportService.SetPlayMode({
         InstanceID: 0,
-        NewPlayMode: playMode,
+        NewPlayMode: p.data,
       }),
-      res
+      res,
     )
   },
 
@@ -120,82 +210,39 @@ export const deviceRoutes = splitRoutes<SonosDevice>({
   // ==========================
 
   'POST /replace-queue/:param': async (device, req, res) => {
-    // https://sonos-ts.svrooij.io/sonos-device/methods.html#metadata
-    const { param = '' } = req.params
-
-    if (!param) {
-      return invalidParam(res, param, ['*'])
+    const p = bodyWithParamSchema.safeParse({ ...req.params, ...req.body })
+    if (!p.success) {
+      return invalidBodyOrParams(res, req, p.error)
     }
-
-    let playMode: PlayMode | undefined
-    if (req.body.playMode) {
-      playMode = getPlayMode(req.body.playMode)
-      if (!playMode) {
-        return invalidParam(res, req.body.playMode, playModes)
-      }
-    }
-
+    const { data } = p
     return deviceNoContent(
-      replaceQueueWithURI(device, param, {
-        play: req.body.play,
-        playMode,
+      replaceQueueWithURI(device, data.param, {
+        play: data.play,
+        playMode: data.playMode,
       }),
-      res
+      res,
     )
   },
   'POST /replace-queue': async (device, req, res) => {
-    const url = new URL(req.body.url)
-
-    let playMode: PlayMode | undefined
-    if (req.body.playMode) {
-      playMode = getPlayMode(req.body.playMode)
-      if (!playMode) {
-        return invalidParam(res, req.body.playMode, playModes)
-      }
+    const p = bodyWithUrlSchema.safeParse(req.body)
+    if (!p.success) {
+      return invalidBodyOrParams(res, req, p.error)
     }
-
-    let shuffleOnType: 'album' | 'playlist' | undefined
-    if (req.body.shuffleOnType) {
-      shuffleOnType = req.body.shuffleOnType as 'album' | 'playlist'
-      if (!['album', 'playlist'].includes(shuffleOnType)) {
-        return invalidParam(res, req.body.shuffleOnType, ['album', 'playlist'])
-      }
+    const { data } = p
+    if (data.url.type === data.shuffleOnType) {
+      data.playMode = PLAY_MODES.shuffle
     }
-
-    let uri: string | undefined
-
-    if (url.hostname === 'music.apple.com') {
-      // Remove the leading slash and remove the first segment which is the language eg /us/
-      const path = url.pathname.replace(/^\//, '').split('/').slice(1)
-      if (path[0] === 'album' && url.searchParams.has('i')) {
-        // /us/album/i-dont-believe-you/7058188?i=7058195
-        uri = `apple:track:${url.searchParams.get('i')}`
-      } else if (path[0] === 'album') {
-        // /us/album/i/7058188
-        uri = `apple:album:${path.at(-1)}`
-        if (shuffleOnType === 'album') {
-          playMode = PlayMode.Shuffle
-        }
-      } else if (path[0] === 'playlist') {
-        // /us/playlist/favorites-mix/pl.pm-20e9f373919da080fd28bc99b185f60f
-        uri = `apple:playlist:${path.at(-1)}`
-        if (shuffleOnType === 'playlist') {
-          playMode = PlayMode.Shuffle
-        }
-      }
-    }
-
-    if (uri) {
-      return deviceNoContent(
-        replaceQueueWithURI(device, uri, {
-          play: req.body.play,
-          playMode,
-        }),
-        res
-      )
-    }
-
-    return jsonError(res, 400, `Invalid Apple Music URL: ${url}`)
+    return deviceNoContent(
+      replaceQueueWithURI(
+        device,
+        `${data.url.service}:${data.url.type}:${data.url.id}`,
+        {
+          play: data.play,
+          playMode: data.playMode,
+        },
+      ),
+      res,
+    )
   },
 
   // ==========================
