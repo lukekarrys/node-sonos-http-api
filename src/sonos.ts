@@ -12,16 +12,18 @@ export const PLAY_MODES = {
 
 export const manager = new SonosManager()
 
-export const normalizeDeviceName = (name: string) =>
-  name.toLowerCase().replaceAll(`'`, '').replaceAll(' ', '-')
-
-export const findDeviceByName = (name: string | undefined) => {
-  const deviceId = normalizeDeviceName(decodeURIComponent(name ?? ''))
-  const devices = new Map(
-    manager.Devices.map((d) => [normalizeDeviceName(d.Name), d]),
-  )
-
-  return [devices.get(deviceId), [...devices.keys()]] as const
+export const Devices = {
+  get: () => manager.Devices,
+  getNames: () => manager.Devices.map((d) => d.Name),
+  normalizeName: (name: string) =>
+    name.toLowerCase().replaceAll(`'`, '').replaceAll(' ', '-'),
+  findByName: (name: string) => {
+    const deviceId = Devices.normalizeName(decodeURIComponent(name ?? ''))
+    const devices = new Map(
+      Devices.get().map((d) => [Devices.normalizeName(d.Name), d]),
+    )
+    return devices.get(deviceId)
+  },
 }
 
 const logAction = async <T>(action: () => Promise<T>) => {

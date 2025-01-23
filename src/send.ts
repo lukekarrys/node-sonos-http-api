@@ -34,23 +34,3 @@ export const invalidBodyOrParams = (
     params: req.params,
     error: err,
   })
-
-export const sse = (req: Request, res: Response) => {
-  const write = (data: string) =>
-    void res.write(`${data.startsWith(':') ? data : `data: ${data}`}\n\n`)
-
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
-  })
-
-  const hb = setInterval(() => write(':heartbeat'), 30 * 1000)
-
-  req.on('close', () => {
-    clearInterval(hb)
-    res.end()
-  })
-
-  return write
-}

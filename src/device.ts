@@ -1,24 +1,20 @@
-import type { Request, Response } from 'polka'
+import polka, { type Request, type Response, type NextHandler } from 'polka'
 import type { Methods } from 'trouter'
-import type { SonosDevice, SonosManager } from '@svrooij/sonos'
+import { type SonosDevice } from '@svrooij/sonos'
 import { type StrongSonosEvents } from '@svrooij/sonos/lib/models/strong-sonos-events.js'
 import { PlayMode } from '@svrooij/sonos/lib/models/playmode.js'
 import { SonosEvents } from '@svrooij/sonos'
 import {
   json,
   empty,
-  sse,
   jsonError,
   invalidParam,
   invalidBodyOrParams,
 } from './send.ts'
-import {
-  PLAY_MODES,
-  normalizeDeviceName,
-  runAction,
-  runActions,
-} from './sonos.ts'
+import { Devices, PLAY_MODES, runAction, runActions } from './sonos.ts'
 import { z } from 'zod'
+
+export { type SonosDevice } from '@svrooij/sonos'
 
 const playModeSchema = z
   .string()
@@ -45,7 +41,7 @@ const bodySchema = z.object({
   playMode: z.optional(playModeSchema),
 })
 
-function processMusicUrl(urlString: string) {
+const processMusicUrl = (urlString: string) => {
   const url = new URL(urlString)
 
   if (url.hostname === 'music.apple.com') {
@@ -115,9 +111,26 @@ const deviceSse = <
   event: TEvent,
   cb: (data: TData) => object,
 ) => {
-  const write = sse(req, res)
-  device.Events.on(event, ((data: TData) =>
-    write(JSON.stringify(cb(data)))) as THandler)
+  const write = (data: string) =>
+    void res.write(`${data.startsWith(':') ? data : `data: ${data}`}\n\n`)
+
+  const handler = ((data: TData) => write(JSON.stringify(cb(data)))) as THandler
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  })
+
+  device.Events.on(event, handler)
+
+  const hb = setInterval(() => write(':heartbeat'), 30 * 1000)
+
+  req.on('close', () => {
+    clearInterval(hb)
+    device.Events.off(event, handler)
+    res.end()
+  })
 }
 
 const deviceNoContent = async (p: () => Promise<boolean>, res: Response) => {
@@ -150,28 +163,10 @@ const replaceQueueWithURI = async (
     play ? () => device.Play() : null,
   ])
 
-const splitRoutes = <T>(
-  routes: Record<
-    `${Methods} /${string}`,
-    (arg1: T, req: Request, res: Response) => Promise<void> | void
-  >,
-) =>
-  Object.entries(routes).map(([key, handler]) => {
-    const [method, path] = key.split(' ')
-    return [method as Methods, path!, handler] as const
-  })
-
-export const managerRoutes = splitRoutes<SonosManager>({
-  'GET /devices': (manager, req, res) => json(res, 200, manager.Devices),
-  'GET /devices/name': (manager, req, res) =>
-    json(
-      res,
-      200,
-      manager.Devices.map((d) => normalizeDeviceName(d.Name)),
-    ),
-})
-
-export const deviceRoutes = splitRoutes<SonosDevice>({
+const deviceRoutes: Record<
+  `${Methods} /${string}`,
+  (arg1: SonosDevice, req: Request, res: Response) => Promise<void> | void
+> = {
   // ==========================
   // Playback actions
   // ==========================
@@ -266,4 +261,38 @@ export const deviceRoutes = splitRoutes<SonosDevice>({
   'GET /events/volume': (device, req, res) => {
     deviceSse(device, req, res, SonosEvents.Volume, (volume) => ({ volume }))
   },
-})
+}
+
+const DEVICE_KEY = 'deviceKey'
+
+const app = polka<Request & { device?: SonosDevice }>().use(
+  (
+    req: Request & { device?: SonosDevice },
+    res: Response,
+    next: NextHandler,
+  ) => {
+    const param = req.params[DEVICE_KEY]
+    req.device = param ? Devices.findByName(param) : undefined
+    return next()
+  },
+)
+
+for (const [key, handler] of Object.entries(deviceRoutes)) {
+  const [method, path] = key.split(' ')
+  app.add(method as Methods, `/:${DEVICE_KEY}${path}`, async (req, res) => {
+    if (!req.device) {
+      return invalidParam(res, DEVICE_KEY, Devices.getNames())
+    }
+    const start = Date.now()
+    await handler(req.device, req, res)
+    console.log(
+      'RES',
+      req.method,
+      req.url,
+      res.statusCode,
+      `${Date.now() - start}ms`,
+    )
+  })
+}
+
+export default app
