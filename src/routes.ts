@@ -120,7 +120,7 @@ const deviceSse = <
     write(JSON.stringify(cb(data)))) as THandler)
 }
 
-const deviceNoContent = async (p: Promise<boolean>, res: Response) => {
+const deviceNoContent = async (p: () => Promise<boolean>, res: Response) => {
   try {
     await runAction(p)
     return empty(res)
@@ -177,19 +177,19 @@ export const deviceRoutes = splitRoutes<SonosDevice>({
   // ==========================
 
   'POST /play': async (device, req, res) => {
-    return deviceNoContent(device.Play(), res)
+    return deviceNoContent(() => device.Play(), res)
   },
   'POST /pause': async (device, req, res) => {
-    return deviceNoContent(device.Pause(), res)
+    return deviceNoContent(() => device.Pause(), res)
   },
   'POST /toggle-playback': async (device, req, res) => {
-    return deviceNoContent(device.TogglePlayback(), res)
+    return deviceNoContent(() => device.TogglePlayback(), res)
   },
   'POST /next': async (device, req, res) => {
-    return deviceNoContent(device.Next(), res)
+    return deviceNoContent(() => device.Next(), res)
   },
   'POST /prev': async (device, req, res) => {
-    return deviceNoContent(device.Previous(), res)
+    return deviceNoContent(() => device.Previous(), res)
   },
   'POST /playmode/:param': async (device, req, res) => {
     const p = playModeSchema.safeParse(req.params.param)
@@ -197,10 +197,11 @@ export const deviceRoutes = splitRoutes<SonosDevice>({
       return invalidParam(res, req.params.param, Object.keys(PLAY_MODES))
     }
     return deviceNoContent(
-      device.AVTransportService.SetPlayMode({
-        InstanceID: 0,
-        NewPlayMode: p.data,
-      }),
+      () =>
+        device.AVTransportService.SetPlayMode({
+          InstanceID: 0,
+          NewPlayMode: p.data,
+        }),
       res,
     )
   },
@@ -216,10 +217,11 @@ export const deviceRoutes = splitRoutes<SonosDevice>({
     }
     const { data } = p
     return deviceNoContent(
-      replaceQueueWithURI(device, data.param, {
-        play: data.play,
-        playMode: data.playMode,
-      }),
+      () =>
+        replaceQueueWithURI(device, data.param, {
+          play: data.play,
+          playMode: data.playMode,
+        }),
       res,
     )
   },
@@ -233,14 +235,15 @@ export const deviceRoutes = splitRoutes<SonosDevice>({
       data.playMode = PLAY_MODES.shuffle
     }
     return deviceNoContent(
-      replaceQueueWithURI(
-        device,
-        `${data.url.service}:${data.url.type}:${data.url.id}`,
-        {
-          play: data.play,
-          playMode: data.playMode,
-        },
-      ),
+      () =>
+        replaceQueueWithURI(
+          device,
+          `${data.url.service}:${data.url.type}:${data.url.id}`,
+          {
+            play: data.play,
+            playMode: data.playMode,
+          },
+        ),
       res,
     )
   },

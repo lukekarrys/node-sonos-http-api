@@ -7,7 +7,15 @@ import { managerRoutes, deviceRoutes } from './routes.ts'
 import { manager, findDeviceByName } from './sonos.ts'
 
 const logger = () => (req: Request, res: Response, next: NextHandler) => {
-  // console.log(req.url, req.body, req.headers)
+  if (req.url !== '/hc') {
+    console.log(
+      'REQ',
+      req.method,
+      req.url,
+      JSON.stringify(req.params),
+      JSON.stringify(req.body),
+    )
+  }
   return next()
 }
 
@@ -32,13 +40,21 @@ for (const [method, path, handler] of managerRoutes) {
 
 for (const [method, path, handler] of deviceRoutes) {
   const key = 'deviceParam'
-  app.add(method, `/d/:${key}${path}`, (req, res) => {
+  app.add(method, `/d/:${key}${path}`, async (req, res) => {
     const param = req.params[key]
     const [device, devices] = findDeviceByName(param)
     if (!device) {
       return invalidParam(res, param, devices)
     }
-    return handler(device, req, res)
+    const start = Date.now()
+    await handler(device, req, res)
+    console.log(
+      'RES',
+      req.method,
+      req.url,
+      res.statusCode,
+      `${Date.now() - start}ms`,
+    )
   })
 }
 

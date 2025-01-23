@@ -24,8 +24,22 @@ export const findDeviceByName = (name: string | undefined) => {
   return [devices.get(deviceId), [...devices.keys()]] as const
 }
 
-export const runAction = async (action: Promise<boolean>) => {
-  const res = await action
+const logAction = async <T>(action: () => Promise<T>) => {
+  const start = Date.now()
+  const res = await action()
+  let log = `SONOS (${Date.now() - start}ms)`
+  try {
+    log += ` ${action.toString().replaceAll(/\n/g, '').replaceAll(/\s+/g, ' ').replace(`() => `, '')}`
+  } catch {
+    log += ` [unknown action]`
+    // this could error if new actions are added that dont work. so just to be safe dont log those
+  }
+  console.log(log)
+  return res
+}
+
+export const runAction = async (action: () => Promise<boolean>) => {
+  const res = await logAction(action)
   if (res === false) {
     throw new Error('action returned false indicating it did not succeed')
   }
@@ -39,7 +53,7 @@ export const runActions = async (
     if (action === null) {
       continue
     }
-    const res = await action()
+    const res = await logAction(action)
     if (res === false) {
       throw new Error('action returned false indicating it did not succeed')
     }
