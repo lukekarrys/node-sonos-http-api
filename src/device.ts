@@ -2,7 +2,9 @@ import polka, { type Request, type Response, type NextHandler } from 'polka'
 import type { Methods } from 'trouter'
 import { type SonosDevice } from '@svrooij/sonos'
 import { type StrongSonosEvents } from '@svrooij/sonos/lib/models/strong-sonos-events.js'
-import { PlayMode } from '@svrooij/sonos/lib/models/playmode.js'
+import { type AVTransportServiceEvent } from '@svrooij/sonos/lib/services/av-transport.service.js'
+import { PlayMode, Repeat } from '@svrooij/sonos/lib/models/playmode.js'
+import { type Track } from '@svrooij/sonos/lib/models/track.js'
 import { SonosEvents } from '@svrooij/sonos'
 import {
   json,
@@ -133,6 +135,206 @@ const deviceSse = <
   })
 }
 
+// Helper to convert PlayMode to shuffle/repeat format expected by Arduino
+// Logic from PlayModeHelper (avoiding import issues with CJS/ESM)
+const computeShuffle = (playMode: PlayMode): boolean =>
+  [
+    PlayMode.Shuffle,
+    PlayMode.ShuffleNoRepeat,
+    PlayMode.ShuffleRepeatOne,
+  ].includes(playMode)
+
+const computeRepeat = (playMode: PlayMode): Repeat => {
+  switch (playMode) {
+    case PlayMode.RepeatAll:
+    case PlayMode.Shuffle:
+      return Repeat.RepeatAll
+    case PlayMode.RepeatOne:
+    case PlayMode.ShuffleRepeatOne:
+      return Repeat.RepeatOne
+    case PlayMode.Normal:
+    case PlayMode.ShuffleNoRepeat:
+    default:
+      return Repeat.Off
+  }
+}
+
+const parsePlayMode = (playMode: PlayMode | undefined) => ({
+  shuffle: playMode ? computeShuffle(playMode) : false,
+  repeat: playMode ? computeRepeat(playMode) : Repeat.Off,
+})
+
+// Helper to extract track info from Track object
+const parseTrack = (track: Track | string | undefined) => {
+  if (!track || typeof track === 'string') {
+    return { artist: '', title: '', album: '' }
+  }
+  return {
+    artist: track.Artist ?? '',
+    title: track.Title ?? '',
+    album: track.Album ?? '',
+  }
+}
+
+// Type for the full state sent to Arduino
+type ArduinoTransportState = {
+  type: 'transport-state'
+  data: {
+    state: {
+      volume: number
+      mute: boolean
+      currentTrack: { artist: string; title: string; album: string }
+      playMode: { shuffle: boolean; repeat: Repeat }
+      playbackState: string
+    }
+  }
+}
+
+type ArduinoVolumeChange = {
+  type: 'volume-change'
+  data: { newVolume: number }
+}
+
+type ArduinoMuteChange = {
+  type: 'mute-change'
+  data: { newMute: boolean }
+}
+
+type ArduinoEvent =
+  | ArduinoTransportState
+  | ArduinoVolumeChange
+  | ArduinoMuteChange
+
+// Multi-event SSE for full device state (used by Arduino)
+const deviceEventsSse = (device: SonosDevice, req: Request, res: Response) => {
+  // Current state tracking
+  let currentState = {
+    volume: 0,
+    mute: false,
+    currentTrack: { artist: '', title: '', album: '' },
+    playMode: { shuffle: false, repeat: Repeat.Off as Repeat },
+    playbackState: 'STOPPED',
+  }
+
+  const write = (data: string) =>
+    void res.write(`${data.startsWith(':') ? data : `data: ${data}`}\n\n`)
+
+  const sendEvent = (event: ArduinoEvent) => write(JSON.stringify(event))
+
+  const sendFullState = () => {
+    sendEvent({
+      type: 'transport-state',
+      data: { state: currentState },
+    })
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  })
+
+  // Handler for volume changes
+  const volumeHandler = (volume: number) => {
+    currentState.volume = volume
+    sendEvent({ type: 'volume-change', data: { newVolume: volume } })
+  }
+
+  // Handler for mute changes
+  const muteHandler = (mute: boolean) => {
+    currentState.mute = mute
+    sendEvent({ type: 'mute-change', data: { newMute: mute } })
+  }
+
+  // Handler for AVTransport events (contains track, playmode, transport state)
+  const avtransportHandler = (data: AVTransportServiceEvent) => {
+    let hasChange = false
+
+    // Update transport state if present
+    if (data.CurrentTransportActions !== undefined) {
+      // CurrentTransportActions contains things like "Play,Pause,Stop,Next,Previous"
+      // But we need the actual playback state from elsewhere
+    }
+
+    // Check for track changes
+    if (data.CurrentTrackMetaData !== undefined) {
+      const newTrack = parseTrack(data.CurrentTrackMetaData)
+      if (
+        newTrack.artist !== currentState.currentTrack.artist ||
+        newTrack.title !== currentState.currentTrack.title ||
+        newTrack.album !== currentState.currentTrack.album
+      ) {
+        currentState.currentTrack = newTrack
+        hasChange = true
+      }
+    }
+
+    // Check for playmode changes
+    if (data.CurrentPlayMode !== undefined) {
+      const newPlayMode = parsePlayMode(data.CurrentPlayMode)
+      if (
+        newPlayMode.shuffle !== currentState.playMode.shuffle ||
+        newPlayMode.repeat !== currentState.playMode.repeat
+      ) {
+        currentState.playMode = newPlayMode
+        hasChange = true
+      }
+    }
+
+    if (hasChange) {
+      sendFullState()
+    }
+  }
+
+  // Handler for transport state changes (PLAYING, PAUSED, STOPPED, etc)
+  const transportStateHandler = (state: string) => {
+    if (state !== currentState.playbackState) {
+      currentState.playbackState = state
+      sendFullState()
+    }
+  }
+
+  // Subscribe to all relevant events
+  device.Events.on(SonosEvents.Volume, volumeHandler)
+  device.Events.on(SonosEvents.Mute, muteHandler)
+  device.Events.on(SonosEvents.AVTransport, avtransportHandler)
+  device.Events.on(SonosEvents.CurrentTransportState, transportStateHandler)
+
+  const hb = setInterval(() => write(':heartbeat'), 30 * 1000)
+
+  // Fetch initial state and send it
+  Promise.all([
+    device.GetState(),
+    device.AVTransportService.GetTransportSettings({ InstanceID: 0 }),
+  ])
+    .then(([state, transportSettings]) => {
+      // Get track from positionInfo
+      const track = state.positionInfo?.TrackMetaData
+      currentState = {
+        volume: state.volume ?? 0,
+        mute: state.muted ?? false,
+        currentTrack: parseTrack(track),
+        playMode: parsePlayMode(transportSettings.PlayMode),
+        playbackState: state.transportState ?? 'STOPPED',
+      }
+      sendFullState()
+    })
+    .catch((err) => {
+      console.error('Failed to get initial state:', err)
+      // Send empty state anyway
+      sendFullState()
+    })
+
+  req.on('close', () => {
+    clearInterval(hb)
+    device.Events.off(SonosEvents.Volume, volumeHandler)
+    device.Events.off(SonosEvents.Mute, muteHandler)
+    device.Events.off(SonosEvents.AVTransport, avtransportHandler)
+    device.Events.off(SonosEvents.CurrentTransportState, transportStateHandler)
+    res.end()
+  })
+}
+
 const deviceNoContent = async (p: () => Promise<boolean>, res: Response) => {
   try {
     await runAction(p)
@@ -255,11 +457,92 @@ const deviceRoutes: Record<
   },
 
   // ==========================
+  // Arduino GET routes (simple GET actions)
+  // ==========================
+
+  'GET /previous': async (device, req, res) => {
+    return deviceNoContent(() => device.Previous(), res)
+  },
+  'GET /next': async (device, req, res) => {
+    return deviceNoContent(() => device.Next(), res)
+  },
+  'GET /playpause': async (device, req, res) => {
+    return deviceNoContent(() => device.TogglePlayback(), res)
+  },
+  'GET /togglemute': async (device, req, res) => {
+    try {
+      const { CurrentMute } = await device.RenderingControlService.GetMute({
+        InstanceID: 0,
+        Channel: 'Master',
+      })
+      await device.RenderingControlService.SetMute({
+        InstanceID: 0,
+        Channel: 'Master',
+        DesiredMute: !CurrentMute,
+      })
+      return empty(res)
+    } catch (err) {
+      return jsonError(res, 500, 'Failed to toggle mute', err)
+    }
+  },
+  'GET /volume/:delta': async (device, req, res) => {
+    const delta = parseInt(req.params.delta ?? '', 10)
+    if (isNaN(delta)) {
+      return invalidParam(res, 'delta', ['integer like -1, +1, -5, +5'])
+    }
+    try {
+      await device.SetRelativeVolume(delta)
+      return empty(res)
+    } catch (err) {
+      return jsonError(res, 500, 'Failed to adjust volume', err)
+    }
+  },
+  'GET /shuffle/toggle': async (device, req, res) => {
+    try {
+      const { PlayMode: currentPlayMode } =
+        await device.AVTransportService.GetTransportSettings({ InstanceID: 0 })
+      const currentShuffle = computeShuffle(currentPlayMode)
+      await device.SetShuffle(!currentShuffle)
+      return empty(res)
+    } catch (err) {
+      return jsonError(res, 500, 'Failed to toggle shuffle', err)
+    }
+  },
+  'GET /repeat/toggle': async (device, req, res) => {
+    try {
+      const { PlayMode: currentPlayMode } =
+        await device.AVTransportService.GetTransportSettings({ InstanceID: 0 })
+      const currentRepeat = computeRepeat(currentPlayMode)
+      // Cycle: Off -> RepeatAll -> RepeatOne -> Off
+      const nextRepeat =
+        currentRepeat === Repeat.Off ? Repeat.RepeatAll
+        : currentRepeat === Repeat.RepeatAll ? Repeat.RepeatOne
+        : Repeat.Off
+      await device.SetRepeat(nextRepeat)
+      return empty(res)
+    } catch (err) {
+      return jsonError(res, 500, 'Failed to toggle repeat', err)
+    }
+  },
+  'GET /trackseek/:track': async (device, req, res) => {
+    const track = parseInt(req.params.track ?? '', 10)
+    if (isNaN(track) || track < 1) {
+      return invalidParam(res, 'track', ['positive integer'])
+    }
+    return deviceNoContent(() => device.SeekTrack(track), res)
+  },
+
+  // ==========================
   // Server-Sent Events Routes
   // ==========================
 
   'GET /events/volume': (device, req, res) => {
     deviceSse(device, req, res, SonosEvents.Volume, (volume) => ({ volume }))
+  },
+
+  // Full events route for Arduino - provides transport-state, volume-change, mute-change events
+  'GET /events': (device, req, res) => {
+    deviceEventsSse(device, req, res)
   },
 }
 
@@ -288,7 +571,7 @@ for (const [key, handler] of Object.entries(deviceRoutes)) {
     console.log(
       'RES',
       req.method,
-      req.url,
+      '/d' + req.url,
       res.statusCode,
       `${Date.now() - start}ms`,
     )

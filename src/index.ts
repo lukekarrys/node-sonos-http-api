@@ -41,6 +41,13 @@ const app = polka<Request & { device?: SonosDevice }>({
       Devices.get().map((d) => Devices.normalizeName(d.Name)),
     ),
   )
+  .get('/devices/name/arduino', (req, res) =>
+    json(
+      res,
+      200,
+      Devices.get().map((d) => ({ roomName: Devices.normalizeName(d.Name) })),
+    ),
+  )
   .use('d', deviceApp)
 
 await Promise.all([
